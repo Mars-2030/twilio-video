@@ -8,20 +8,21 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // 2. Robust Body Parsing (Fixes the "Identity Received: undefined" issue)
+    // 2. Parse Body safely
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch (e) { body = {}; }
     }
 
-    const identity = body.identity;
-    const roomName = body.roomName;
+    // 3. THE FIX: Match the exact keys sent by the Twilio React App
+    const identity = body.user_identity || body.identity;
+    const roomName = body.room_name || body.roomName;
 
     console.log(`TRACE: Received Identity: "${identity}", Room: "${roomName}"`);
 
-    // 3. Validation: The React app requires a matching identity
+    // 4. Validation
     if (!identity) {
-      console.error("ERROR: No identity found. Check frontend fetch headers.");
+      console.error("ERROR: No identity found. Body received was:", body);
       return res.status(400).json({ error: 'Identity is required' });
     }
 
@@ -29,16 +30,20 @@ module.exports = async (req, res) => {
     const apiKey = process.env.TWILIO_API_KEY_SID;
     const apiSecret = process.env.TWILIO_API_KEY_SECRET;
 
+    if (!accountSid || !apiKey || !apiSecret) {
+      return res.status(500).json({ error: 'Missing Twilio Env Variables' });
+    }
+
+    // 5. Generate Token
     const AccessToken = Twilio.jwt.AccessToken;
     const token = new AccessToken(accountSid.trim(), apiKey.trim(), apiSecret.trim(), { 
-      identity: identity, 
+      identity: String(identity), 
       ttl: 3600 
     });
 
-    token.addGrant(new AccessToken.VideoGrant({ room: roomName }));
+    token.addGrant(new AccessToken.VideoGrant({ room: String(roomName) }));
 
-    // 4. Return EXACTLY what the React app expects
-    // This fixes the "token must be a string" error in the browser
+    // 6. Return exact JSON format expected by the React app
     return res.status(200).json({ 
       token: token.toJwt(), 
       identity: identity 
