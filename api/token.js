@@ -4,24 +4,22 @@ module.exports = async (req, res) => {
   try {
     const { identity, roomName } = req.body || {};
     
-    // 1. Get credentials from environment
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const apiKey = process.env.TWILIO_API_KEY_SID;
     const apiSecret = process.env.TWILIO_API_KEY_SECRET;
-    // This is optional but highly recommended for this specific app
     const conversationServiceSid = process.env.TWILIO_CONVERSATIONS_SERVICE_SID;
 
     if (!accountSid || !apiKey || !apiSecret) {
       return res.status(500).json({ error: 'Twilio credentials missing' });
     }
 
+    // This React app uses the username as the identity
+    const tokenIdentity = identity ? String(identity) : `user-${Math.floor(Math.random() * 10000)}`;
+
     const AccessToken = Twilio.jwt.AccessToken;
     const { VideoGrant, ChatGrant } = AccessToken;
 
-    // 2. Identity is REQUIRED by this React app. Ensure it's never empty.
-    const tokenIdentity = identity || `user-${Math.floor(Math.random() * 10000)}`;
-
-    // 3. Create the token
+    // Create the Access Token
     const token = new AccessToken(
       accountSid.trim(),
       apiKey.trim(),
@@ -29,21 +27,19 @@ module.exports = async (req, res) => {
       { identity: tokenIdentity, ttl: 3600 }
     );
 
-    // 4. ADD VIDEO GRANT
+    // 1. Add Video Grant
     const videoGrant = new VideoGrant({ room: roomName || 'default' });
     token.addGrant(videoGrant);
 
-    // 5. ADD CHAT GRANT (Crucial for this specific React app)
-    // If you don't have a Conversations Service SID, we use a placeholder 
-    // to satisfy the SDK's initialization logic.
-    if (conversationServiceSid) {
+    // 2. Add Chat Grant ONLY if Service SID exists
+    // This stops the 20151 error caused by empty grants
+    if (conversationServiceSid && conversationServiceSid.startsWith('IS')) {
       const chatGrant = new ChatGrant({ serviceSid: conversationServiceSid });
       token.addGrant(chatGrant);
-    } else {
-      // Fallback: If no service SID is provided, we still add a generic ChatGrant
-      // which often resolves the initialization loop in the React App.
-      token.addGrant(new ChatGrant());
     }
+
+    // Log the token metadata to Vercel logs for debugging
+    console.log(`Token created: Identity=${tokenIdentity}, Room=${roomName}`);
 
     res.status(200).json({ 
       token: token.toJwt(),
@@ -51,7 +47,7 @@ module.exports = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Token Error:', error);
+    console.error('API Error:', error);
     res.status(500).json({ error: error.message });
   }
 };
