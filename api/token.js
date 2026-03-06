@@ -1,53 +1,53 @@
 const Twilio = require('twilio');
 
 module.exports = async (req, res) => {
+  // Handle CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
   try {
-    const { identity, roomName } = req.body || {};
-    
+    // 1. Robust Body Parsing
+    let data = req.body;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (e) { data = {}; }
+    }
+
+    // 2. Destructure fields
+    const identity = data.identity;
+    const roomName = data.roomName;
+
+    console.log(`DEBUG: Identity Received: "${identity}", Room Received: "${roomName}"`);
+
+    // 3. Validation
+    if (!identity) {
+      console.error("CRITICAL: No identity received from frontend!");
+      return res.status(400).json({ error: 'Identity is required to match your UI' });
+    }
+
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const apiKey = process.env.TWILIO_API_KEY_SID;
     const apiSecret = process.env.TWILIO_API_KEY_SECRET;
-    const conversationServiceSid = process.env.TWILIO_CONVERSATIONS_SERVICE_SID;
-
-    if (!accountSid || !apiKey || !apiSecret) {
-      return res.status(500).json({ error: 'Twilio credentials missing' });
-    }
-
-    // This React app uses the username as the identity
-    const tokenIdentity = identity ? String(identity) : `user-${Math.floor(Math.random() * 10000)}`;
 
     const AccessToken = Twilio.jwt.AccessToken;
-    const { VideoGrant, ChatGrant } = AccessToken;
+    const token = new AccessToken(accountSid.trim(), apiKey.trim(), apiSecret.trim(), { 
+      identity: identity, 
+      ttl: 3600 
+    });
 
-    // Create the Access Token
-    const token = new AccessToken(
-      accountSid.trim(),
-      apiKey.trim(),
-      apiSecret.trim(),
-      { identity: tokenIdentity, ttl: 3600 }
-    );
+    token.addGrant(new AccessToken.VideoGrant({ room: roomName }));
 
-    // 1. Add Video Grant
-    const videoGrant = new VideoGrant({ room: roomName || 'default' });
-    token.addGrant(videoGrant);
-
-    // 2. Add Chat Grant ONLY if Service SID exists
-    // This stops the 20151 error caused by empty grants
-    if (conversationServiceSid && conversationServiceSid.startsWith('IS')) {
-      const chatGrant = new ChatGrant({ serviceSid: conversationServiceSid });
-      token.addGrant(chatGrant);
-    }
-
-    // Log the token metadata to Vercel logs for debugging
-    console.log(`Token created: Identity=${tokenIdentity}, Room=${roomName}`);
-
-    res.status(200).json({ 
-      token: token.toJwt(),
-      identity: tokenIdentity 
+    console.log(`SUCCESS: Token created for ${identity}`);
+    
+    return res.status(200).json({ 
+      token: token.toJwt(), 
+      identity: identity 
     });
 
   } catch (error) {
-    console.error('API Error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('ERROR:', error.message);
+    return res.status(500).json({ error: error.message });
   }
 };
