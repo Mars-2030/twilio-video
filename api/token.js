@@ -1,41 +1,24 @@
-const Twilio = require('twilio');
-
-module.exports = async (req, res) => {
-  // 1. Only allow POST requests (which is what the app uses)
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  try {
+try {
     const { identity, roomName } = req.body;
+    
+    // If the app doesn't send an identity, we must provide a fallback 
+    // or the token signature will fail.
+    const userIdentity = identity || `user-${Math.floor(Math.random() * 10000)}`;
+    const room = roomName || 'default-room';
 
-    // 2. Validate environment variables
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const apiKey = process.env.TWILIO_API_KEY_SID;
-    const apiSecret = process.env.TWILIO_API_KEY_SECRET;
+    console.log(`Generating token for Identity: ${userIdentity} in Room: ${room}`);
 
-    if (!accountSid || !apiKey || !apiSecret) {
-      throw new Error("Missing Twilio credentials in Environment Variables");
-    }
+    const token = new Twilio.jwt.AccessToken(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_API_KEY_SID,
+      process.env.TWILIO_API_KEY_SECRET,
+      { 
+        identity: userIdentity,
+        ttl: 3600 // Token valid for 1 hour
+      }
+    );
 
-    const AccessToken = Twilio.jwt.AccessToken;
-    const { VideoGrant } = AccessToken;
-
-    // 3. Create the token
-    const token = new AccessToken(accountSid, apiKey, apiSecret, { 
-      identity: identity || 'user' 
-    });
-
-    // 4. Add the video grant
-    const videoGrant = new VideoGrant({ room: roomName });
+    const videoGrant = new Twilio.jwt.AccessToken.VideoGrant({ room: room });
     token.addGrant(videoGrant);
 
-    // 5. Send JSON response
-    res.setHeader('Content-Type', 'application/json');
-    res.status(200).send(JSON.stringify({ token: token.toJwt() }));
-
-  } catch (error) {
-    console.error('Token Error:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-};
+    res.status(200).json({ token: token.toJwt() });
