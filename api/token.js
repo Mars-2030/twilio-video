@@ -1,56 +1,43 @@
 const Twilio = require('twilio');
 
 module.exports = async (req, res) => {
-  // 1. Handle preflight/options requests for CORS if needed
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  // 2. Only allow POST requests
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed. Use POST.' });
-  }
-
   try {
-    const { identity, roomName } = req.body;
+    // Log the incoming request to see what the browser is sending
+    console.log('Incoming Request Body:', req.body);
 
-    // Validate environment variables
+    const { identity, roomName } = req.body || {};
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const apiKey = process.env.TWILIO_API_KEY_SID;
     const apiSecret = process.env.TWILIO_API_KEY_SECRET;
 
+    // Check if variables are actually present
     if (!accountSid || !apiKey || !apiSecret) {
-      return res.status(500).json({ error: "Twilio credentials missing in Vercel settings." });
+      console.error('Missing Environment Variables');
+      return res.status(500).json({ error: 'Server configuration error' });
     }
 
-    // Ensure we have an identity (Twilio requires this for the signature)
-    const userIdentity = identity || `user-${Math.floor(Math.random() * 10000)}`;
-    const room = roomName || 'default-room';
-
-    // 3. Create the Access Token
     const AccessToken = Twilio.jwt.AccessToken;
     const VideoGrant = AccessToken.VideoGrant;
 
-    const token = new AccessToken(
-      accountSid,
-      apiKey,
-      apiSecret,
-      { identity: userIdentity, ttl: 3600 }
-    );
+    // Twilio requires an identity. Fallback if the app sends nothing.
+    const tokenIdentity = identity || `user-${Math.floor(Math.random() * 10000)}`;
 
-    // 4. Grant access to Video
-    const grant = new VideoGrant({ room: room });
-    token.addGrant(grant);
-
-    // 5. Send the JWT token
-    res.setHeader('Content-Type', 'application/json');
-    return res.status(200).send({ 
-      token: token.toJwt(),
-      identity: userIdentity 
+    const token = new AccessToken(accountSid, apiKey, apiSecret, { 
+      identity: tokenIdentity,
+      ttl: 3600 
     });
 
+    const videoGrant = new VideoGrant({ room: roomName || 'default' });
+    token.addGrant(videoGrant);
+
+    console.log(`Generated token for: ${tokenIdentity}`);
+
+    res.status(200).json({ 
+      token: token.toJwt(),
+      identity: tokenIdentity 
+    });
   } catch (error) {
-    console.error('SERVER ERROR:', error);
-    return res.status(500).json({ error: error.message });
+    console.error('Token Error:', error);
+    res.status(500).json({ error: error.message });
   }
 };
