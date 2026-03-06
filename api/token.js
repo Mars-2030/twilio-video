@@ -1,49 +1,53 @@
 const Twilio = require('twilio');
 
 module.exports = async (req, res) => {
-  // 1. Setup CORS so the browser doesn't block the request
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // 2. Parse Body safely
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch (e) { body = {}; }
     }
 
-    // 3. THE FIX: Match the exact keys sent by the Twilio React App
+    // This React app uses user_identity and room_name
     const identity = body.user_identity || body.identity;
     const roomName = body.room_name || body.roomName;
 
-    console.log(`TRACE: Received Identity: "${identity}", Room: "${roomName}"`);
-
-    // 4. Validation
     if (!identity) {
-      console.error("ERROR: No identity found. Body received was:", body);
       return res.status(400).json({ error: 'Identity is required' });
     }
 
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const apiKey = process.env.TWILIO_API_KEY_SID;
     const apiSecret = process.env.TWILIO_API_KEY_SECRET;
+    
+    // Using your verified Service SID
+    const chatServiceSid = process.env.TWILIO_CONVERSATIONS_SERVICE_SID || "ISf125e08961f648c69da253a81794d787";
 
-    if (!accountSid || !apiKey || !apiSecret) {
-      return res.status(500).json({ error: 'Missing Twilio Env Variables' });
-    }
-
-    // 5. Generate Token
     const AccessToken = Twilio.jwt.AccessToken;
-    const token = new AccessToken(accountSid.trim(), apiKey.trim(), apiSecret.trim(), { 
-      identity: String(identity), 
-      ttl: 3600 
-    });
+    const { VideoGrant, ChatGrant } = AccessToken;
 
-    token.addGrant(new AccessToken.VideoGrant({ room: String(roomName) }));
+    const token = new AccessToken(
+      accountSid.trim(),
+      apiKey.trim(),
+      apiSecret.trim(),
+      { identity: String(identity), ttl: 3600 }
+    );
 
-    // 6. Return exact JSON format expected by the React app
+    // 1. ADD VIDEO GRANT (This is what fixed the 20151 error)
+    const videoGrant = new VideoGrant({ room: String(roomName) });
+    token.addGrant(videoGrant);
+
+    // 2. ADD CHAT GRANT (This will fix the Conversations error)
+    const chatGrant = new ChatGrant({ serviceSid: chatServiceSid.trim() });
+    token.addGrant(chatGrant);
+
+    console.log(`Token created with Chat Grant for SID: ${chatServiceSid}`);
+
     return res.status(200).json({ 
       token: token.toJwt(), 
       identity: identity 
