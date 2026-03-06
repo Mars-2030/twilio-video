@@ -1,30 +1,38 @@
 const Twilio = require('twilio');
 
 module.exports = async (req, res) => {
-  // Handle CORS
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // 1. Robust Body Parsing
-    let data = req.body;
-    if (typeof data === 'string') {
-      try { data = JSON.parse(data); } catch (e) { data = {}; }
+    // 1. ADVANCED BODY PARSING
+    // We try multiple ways to find the identity
+    let identity = req.body?.identity;
+    let roomName = req.body?.roomName;
+
+    // If Vercel didn't parse it, try to parse the raw string
+    if (!identity && typeof req.body === 'string') {
+      try {
+        const parsed = JSON.parse(req.body);
+        identity = parsed.identity;
+        roomName = parsed.roomName;
+      } catch (e) { /* ignore */ }
     }
 
-    // 2. Destructure fields
-    const identity = data.identity;
-    const roomName = data.roomName;
+    console.log(`DEBUG: Found Identity: "${identity}", Room: "${roomName}"`);
 
-    console.log(`DEBUG: Identity Received: "${identity}", Room Received: "${roomName}"`);
-
-    // 3. Validation
+    // 2. ERROR HANDLING
     if (!identity) {
-      console.error("CRITICAL: No identity received from frontend!");
-      return res.status(400).json({ error: 'Identity is required to match your UI' });
+      console.error("No identity found in request body.");
+      // We return a 200 with an error string so the React app 
+      // shows a readable error instead of crashing.
+      return res.status(200).json({ 
+        error: "NO_IDENTITY", 
+        token: "Error: No name provided" 
+      });
     }
 
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -39,15 +47,13 @@ module.exports = async (req, res) => {
 
     token.addGrant(new AccessToken.VideoGrant({ room: roomName }));
 
-    console.log(`SUCCESS: Token created for ${identity}`);
-    
     return res.status(200).json({ 
       token: token.toJwt(), 
       identity: identity 
     });
 
   } catch (error) {
-    console.error('ERROR:', error.message);
+    console.error('SERVER CRASH:', error.message);
     return res.status(500).json({ error: error.message });
   }
 };
