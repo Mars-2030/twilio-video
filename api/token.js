@@ -1,64 +1,57 @@
 const Twilio = require('twilio');
 
 module.exports = async (req, res) => {
-  console.log('--- TOKEN TRACE START ---');
-  console.log('Method:', req.method);
-  console.log('Body:', JSON.stringify(req.body));
-
   try {
     const { identity, roomName } = req.body || {};
-
-    // 1. Trace Environment Variables (Masked for safety)
+    
+    // 1. Get credentials from environment
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const apiKey = process.env.TWILIO_API_KEY_SID;
     const apiSecret = process.env.TWILIO_API_KEY_SECRET;
-
-    console.log('Account SID exists:', !!accountSid, accountSid?.substring(0, 5) + '...');
-    console.log('API Key SID exists:', !!apiKey, apiKey?.substring(0, 5) + '...');
-    console.log('API Secret exists:', !!apiSecret, '(hidden)');
+    // This is optional but highly recommended for this specific app
+    const conversationServiceSid = process.env.TWILIO_CONVERSATIONS_SERVICE_SID;
 
     if (!accountSid || !apiKey || !apiSecret) {
-      console.error('ERROR: Missing environment variables in Vercel settings.');
-      return res.status(500).json({ error: 'Missing Twilio credentials' });
+      return res.status(500).json({ error: 'Twilio credentials missing' });
     }
 
-    // 2. Trace Identity and Room
-    // Twilio 20151 often happens if identity is empty or not a string
-    const tokenIdentity = String(identity || `user-${Math.floor(Math.random() * 10000)}`);
-    const tokenRoom = String(roomName || 'default-room');
-    
-    console.log('Using Identity:', tokenIdentity);
-    console.log('Using Room:', tokenRoom);
-
-    // 3. Generate Token
     const AccessToken = Twilio.jwt.AccessToken;
-    const VideoGrant = AccessToken.VideoGrant;
+    const { VideoGrant, ChatGrant } = AccessToken;
 
+    // 2. Identity is REQUIRED by this React app. Ensure it's never empty.
+    const tokenIdentity = identity || `user-${Math.floor(Math.random() * 10000)}`;
+
+    // 3. Create the token
     const token = new AccessToken(
-      accountSid.trim(), 
-      apiKey.trim(), 
-      apiSecret.trim(), 
+      accountSid.trim(),
+      apiKey.trim(),
+      apiSecret.trim(),
       { identity: tokenIdentity, ttl: 3600 }
     );
 
-    const videoGrant = new VideoGrant({ room: tokenRoom });
+    // 4. ADD VIDEO GRANT
+    const videoGrant = new VideoGrant({ room: roomName || 'default' });
     token.addGrant(videoGrant);
 
-    const jwt = token.toJwt();
-    console.log('JWT Generated successfully. Length:', jwt.length);
-    
-    console.log('--- TOKEN TRACE END ---');
+    // 5. ADD CHAT GRANT (Crucial for this specific React app)
+    // If you don't have a Conversations Service SID, we use a placeholder 
+    // to satisfy the SDK's initialization logic.
+    if (conversationServiceSid) {
+      const chatGrant = new ChatGrant({ serviceSid: conversationServiceSid });
+      token.addGrant(chatGrant);
+    } else {
+      // Fallback: If no service SID is provided, we still add a generic ChatGrant
+      // which often resolves the initialization loop in the React App.
+      token.addGrant(new ChatGrant());
+    }
 
-    res.setHeader('Content-Type', 'application/json');
-    return res.status(200).send({ 
-      token: jwt,
+    res.status(200).json({ 
+      token: token.toJwt(),
       identity: tokenIdentity 
     });
 
   } catch (error) {
-    console.error('--- TRACE ERROR ---');
-    console.error('Message:', error.message);
-    console.error('Stack:', error.stack);
-    return res.status(500).json({ error: error.message });
+    console.error('Token Error:', error);
+    res.status(500).json({ error: error.message });
   }
 };
